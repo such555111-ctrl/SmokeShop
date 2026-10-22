@@ -1,6 +1,6 @@
 services:
   - type: web
-    name: sh-shop-bot
+    name: smoke-shop-bot
     env: python
     plan: free
     buildCommand: pip install -r requirements.txt
@@ -17,5 +17,9 @@ services:
       - key: DATABASE_URL
         sync: false
       - key: SHOP_CONTACT
-        value: SHvape_manager
+        value: ShopVAPEShop_07
+      - key: SHOP_CHANNEL
+        value: kupivayyp
+      - key: PICKUP_POINTS
+        value: "м. Студенческая, пл. Кирова"
     # Данные и фото хранятся в Neon (DATABASE_URL) — Persistent Disk не нужен.

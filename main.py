@@ -20,7 +20,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import declarative_base, sessionmaker, scoped_session
 
 logging.basicConfig(level=logging.INFO)
-log = logging.getLogger("sh_shop")
+log = logging.getLogger("smoke_shop")
 
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
 if not BOT_TOKEN:
@@ -31,7 +31,10 @@ if not BOT_TOKEN:
 BASE_URL = (os.environ.get("WEBHOOK_URL") or os.environ.get("RENDER_EXTERNAL_URL") or "").rstrip("/")
 
 # Telegram-аккаунт менеджера (без @) — на него ведёт кнопка «Написать менеджеру».
-SHOP_CONTACT = (os.environ.get("SHOP_CONTACT") or "SHvape_manager").lstrip("@").strip()
+SHOP_CONTACT = (os.environ.get("SHOP_CONTACT") or "ShopVAPEShop_07").lstrip("@").strip()
+
+# Telegram-канал магазина (без @) — кнопка «Канал» в боте и мини-аппе.
+SHOP_CHANNEL = (os.environ.get("SHOP_CHANNEL") or "kupivayyp").lstrip("@").strip()
 
 # Пароль для входа в админ-панель (/admin). Задаётся в переменных окружения.
 ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD")
@@ -58,7 +61,7 @@ try:
 except ValueError:
     DELIVERY_FEE = 200
 PICKUP_POINTS = [
-    p.strip() for p in (os.environ.get("PICKUP_POINTS") or "Пролетарская,Девяткино,Мурино").split(",") if p.strip()
+    p.strip() for p in (os.environ.get("PICKUP_POINTS") or "м. Студенческая, пл. Кирова").split(",") if p.strip()
 ]
 
 # Программа лояльности: 1 балл = 1 рубль
@@ -797,14 +800,14 @@ def cmd_start(message: types.Message):
     if not BASE_URL:
         bot.send_message(
             message.chat.id,
-            "SH SHOP: мини-апп ещё не сконфигурирован (не задан WEBHOOK_URL)."
+            "SMOKE_shop: мини-апп ещё не сконфигурирован (не задан WEBHOOK_URL)."
         )
         return
 
     keyboard = types.InlineKeyboardMarkup()
     keyboard.add(
         types.InlineKeyboardButton(
-            text="🚀 Открыть SH SHOP",
+            text="🚀 Открыть SMOKE_shop",
             web_app=types.WebAppInfo(url=BASE_URL + "/")
         )
     )
@@ -814,6 +817,14 @@ def cmd_start(message: types.Message):
             types.InlineKeyboardButton(
                 text="💬 Написать менеджеру",
                 url=f"https://t.me/{SHOP_CONTACT}"
+            )
+        )
+
+    if SHOP_CHANNEL:
+        keyboard.add(
+            types.InlineKeyboardButton(
+                text="📢 Наш канал",
+                url=f"https://t.me/{SHOP_CHANNEL}"
             )
         )
 
@@ -828,11 +839,11 @@ def cmd_start(message: types.Message):
 
     bot.send_message(
         message.chat.id,
-        "🚀 *SH SHOP — всё для пара*\n\n"
-        "*Лучшие цены. Всё оригинал.*\n"
-        "Одноразки, жидкости, поды, расходники и шайбы — выбирайте в каталоге.\n"
-        "📍 Самовывоз: Пролетарская, Девяткино, Мурино\n"
-        "🚚 Доставка — 200 ₽\n\n"
+        "💨 *SMOKE\\_shop — Новосибирск*\n\n"
+        "*Топовое железо, свежие вкусы, адекватный прайс. Только оригинал.*\n"
+        "POD-системы, одноразки, жидкости и расходники — выбирайте в каталоге.\n"
+        "📍 Самовывоз: " + ", ".join(PICKUP_POINTS) + "\n\n"
+        "🔞 Только для совершеннолетних.\n"
         "Нажмите кнопку ниже, чтобы открыть каталог и оформить заказ.",
         reply_markup=keyboard,
         parse_mode="Markdown",
@@ -854,7 +865,7 @@ def index():
 
 @app.route("/api/config", methods=["GET"])
 def public_config():
-    return jsonify({"contact": SHOP_CONTACT, "delivery_fee": DELIVERY_FEE, "pickup_points": PICKUP_POINTS,
+    return jsonify({"contact": SHOP_CONTACT, "channel": SHOP_CHANNEL, "delivery_fee": DELIVERY_FEE, "pickup_points": PICKUP_POINTS,
                     "cashback_percent": CASHBACK_PERCENT, "max_points_percent": MAX_POINTS_PERCENT,
                     "point_value": POINT_VALUE})
 
@@ -1105,7 +1116,7 @@ def create_order():
             bot.send_message(
                 customer_chat_id,
                 "✅ Заказ оформлен!\n\n"
-                f"Номер заказа: SH-{new_id}\n"
+                f"Номер заказа: SS-{new_id}\n"
                 f"{items_lines}\n\n"
                 f"{delivery_block}\n\n"
                 f"{discount_line}"
@@ -1118,7 +1129,7 @@ def create_order():
             log.warning("Не удалось отправить подтверждение покупателю: %s", e)
 
     admin_text = (
-        f"🛒 Новый заказ SH-{new_id}\n\n"
+        f"🛒 Новый заказ SS-{new_id}\n\n"
         f"Клиент: {name}\n"
         f"Телефон: {phone}\n"
         + (f"Telegram: @{customer_username}\n" if customer_username else "")
@@ -1218,7 +1229,7 @@ def customer_cancel_order(oid):
 
     for admin_id in ADMIN_CHAT_IDS:
         try:
-            bot.send_message(admin_id, f"❌ Клиент отменил заказ SH-{oid}")
+            bot.send_message(admin_id, f"❌ Клиент отменил заказ SS-{oid}")
         except Exception as e:
             log.warning("Не удалось уведомить администратора %s: %s", admin_id, e)
 
@@ -1614,7 +1625,7 @@ def admin_message_customer(oid):
     try:
         bot.send_message(
             chat_id,
-            f"💬 Сообщение от SH SHOP по заказу SH-{oid}:\n\n{text}"
+            f"💬 Сообщение от SMOKE_shop по заказу SS-{oid}:\n\n{text}"
         )
     except Exception as e:
         abort(400, description=f"Не удалось отправить сообщение: {e}")
@@ -1658,7 +1669,7 @@ def admin_message_question(qid):
     try:
         bot.send_message(
             chat_id,
-            f"💬 Ответ от SH SHOP по товару «{q.get('product_name','')}»:\n\n{text}"
+            f"💬 Ответ от SMOKE_shop по товару «{q.get('product_name','')}»:\n\n{text}"
         )
     except Exception as e:
         abort(400, description=f"Не удалось отправить ответ: {e}")
