@@ -33,8 +33,8 @@ BASE_URL = (os.environ.get("WEBHOOK_URL") or os.environ.get("RENDER_EXTERNAL_URL
 # Telegram-аккаунт менеджера (без @) — на него ведёт кнопка «Написать менеджеру».
 SHOP_CONTACT = (os.environ.get("SHOP_CONTACT") or "ShopVAPEShop_07").lstrip("@").strip()
 
-# Telegram-канал магазина (без @) — кнопка «Канал» в боте и мини-аппе.
-SHOP_CHANNEL = (os.environ.get("SHOP_CHANNEL") or "kupivayyp").lstrip("@").strip()
+# Ссылка на Telegram-канал магазина (приглашение) — кнопка «Канал» в боте и мини-аппе.
+SHOP_CHANNEL_URL = (os.environ.get("SHOP_CHANNEL_URL") or "https://t.me/+1fFwf94J3zxjMmYy").strip()
 
 # Пароль для входа в админ-панель (/admin). Задаётся в переменных окружения.
 ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD")
@@ -88,9 +88,15 @@ app.config["MAX_CONTENT_LENGTH"] = 8 * 1024 * 1024  # 8 МБ на файл
 #  ОТЗЫВЫ: база данных, API и модерация в Telegram
 # =====================================================================
 
-DATABASE_URL = os.environ.get("DATABASE_URL") or "sqlite:///" + os.path.join(APP_DIR, "shop.db")
+# Вся база — в Neon (PostgreSQL). Локального SQLite-фолбэка нет: без DATABASE_URL бот не стартует,
+# чтобы данные никогда не оказались на временной файловой системе Render.
+DATABASE_URL = (os.environ.get("DATABASE_URL") or "").strip()
+if not DATABASE_URL:
+    raise RuntimeError("Переменная окружения DATABASE_URL не задана (строка подключения Neon)")
 if DATABASE_URL.startswith("postgres://"):          # старый формат ссылки
     DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql://", 1)
+if DATABASE_URL.startswith("postgresql") and "sslmode=" not in DATABASE_URL:
+    DATABASE_URL += ("&" if "?" in DATABASE_URL else "?") + "sslmode=require"   # Neon требует SSL
 
 engine = create_engine(
     DATABASE_URL, pool_pre_ping=True, pool_recycle=300,
@@ -194,10 +200,21 @@ class LoyaltyUser(Base):
 # Отдельная фабрика сессий для данных магазина (не мешает сессиям отзывов).
 DocSession = sessionmaker(bind=engine, expire_on_commit=False)
 
-try:
-    Base.metadata.create_all(engine)       # создаст все таблицы, если их ещё нет
-except Exception:
-    log.exception("Не удалось подключиться к базе — проверьте DATABASE_URL")
+def _init_schema(attempts=5):
+    """Создаёт таблицы в Neon, если их ещё нет. Neon может «просыпаться» пару секунд — пробуем несколько раз."""
+    import time
+    for i in range(1, attempts + 1):
+        try:
+            Base.metadata.create_all(engine)
+            return
+        except Exception:
+            log.exception("Не удалось подключиться к Neon (попытка %d/%d)", i, attempts)
+            if i == attempts:
+                raise
+            time.sleep(2 * i)
+
+
+_init_schema()
 
 
 def _get_or_create_loyalty(db, tg_id, lock=False):
@@ -582,7 +599,7 @@ def on_review_moderation(call: types.CallbackQuery):
 
 # --- Вспомогательные функции для товаров и авторизации админа -----------
 
-# Данные лежат в json-файлах, а gunicorn работает в нескольких потоках —
+# Данные лежат в Neon, а gunicorn работает в нескольких потоках —
 # блокировка не даёт двум запросам одновременно списать/перезаписать остатки.
 DATA_LOCK = threading.RLock()
 
@@ -800,14 +817,14 @@ def cmd_start(message: types.Message):
     if not BASE_URL:
         bot.send_message(
             message.chat.id,
-            "SMOKE_shop: мини-апп ещё не сконфигурирован (не задан WEBHOOK_URL)."
+            "SMOKE Shop: мини-апп ещё не сконфигурирован (не задан WEBHOOK_URL)."
         )
         return
 
     keyboard = types.InlineKeyboardMarkup()
     keyboard.add(
         types.InlineKeyboardButton(
-            text="🚀 Открыть SMOKE_shop",
+            text="🚀 Открыть SMOKE Shop",
             web_app=types.WebAppInfo(url=BASE_URL + "/")
         )
     )
@@ -820,11 +837,11 @@ def cmd_start(message: types.Message):
             )
         )
 
-    if SHOP_CHANNEL:
+    if SHOP_CHANNEL_URL:
         keyboard.add(
             types.InlineKeyboardButton(
                 text="📢 Наш канал",
-                url=f"https://t.me/{SHOP_CHANNEL}"
+                url=SHOP_CHANNEL_URL
             )
         )
 
@@ -839,7 +856,7 @@ def cmd_start(message: types.Message):
 
     bot.send_message(
         message.chat.id,
-        "💨 *SMOKE\\_shop — Новосибирск*\n\n"
+        "💨 *SMOKE Shop — Новосибирск*\n\n"
         "*Топовое железо, свежие вкусы, адекватный прайс. Только оригинал.*\n"
         "POD-системы, одноразки, жидкости и расходники — выбирайте в каталоге.\n"
         "📍 Самовывоз: " + ", ".join(PICKUP_POINTS) + "\n\n"
@@ -865,7 +882,7 @@ def index():
 
 @app.route("/api/config", methods=["GET"])
 def public_config():
-    return jsonify({"contact": SHOP_CONTACT, "channel": SHOP_CHANNEL, "delivery_fee": DELIVERY_FEE, "pickup_points": PICKUP_POINTS,
+    return jsonify({"contact": SHOP_CONTACT, "channel_url": SHOP_CHANNEL_URL, "delivery_fee": DELIVERY_FEE, "pickup_points": PICKUP_POINTS,
                     "cashback_percent": CASHBACK_PERCENT, "max_points_percent": MAX_POINTS_PERCENT,
                     "point_value": POINT_VALUE})
 
@@ -1625,7 +1642,7 @@ def admin_message_customer(oid):
     try:
         bot.send_message(
             chat_id,
-            f"💬 Сообщение от SMOKE_shop по заказу SS-{oid}:\n\n{text}"
+            f"💬 Сообщение от SMOKE Shop по заказу SS-{oid}:\n\n{text}"
         )
     except Exception as e:
         abort(400, description=f"Не удалось отправить сообщение: {e}")
@@ -1669,7 +1686,7 @@ def admin_message_question(qid):
     try:
         bot.send_message(
             chat_id,
-            f"💬 Ответ от SMOKE_shop по товару «{q.get('product_name','')}»:\n\n{text}"
+            f"💬 Ответ от SMOKE Shop по товару «{q.get('product_name','')}»:\n\n{text}"
         )
     except Exception as e:
         abort(400, description=f"Не удалось отправить ответ: {e}")

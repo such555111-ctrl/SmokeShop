@@ -18,8 +18,8 @@ services:
         sync: false
       - key: SHOP_CONTACT
         value: ShopVAPEShop_07
-      - key: SHOP_CHANNEL
-        value: kupivayyp
+      - key: SHOP_CHANNEL_URL
+        value: "https://t.me/+1fFwf94J3zxjMmYy"
       - key: PICKUP_POINTS
         value: "м. Студенческая, пл. Кирова"
     # Данные и фото хранятся в Neon (DATABASE_URL) — Persistent Disk не нужен.
