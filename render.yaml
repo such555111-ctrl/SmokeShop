@@ -20,6 +20,8 @@ services:
         value: ShopVAPEShop_07
       - key: SHOP_CHANNEL_URL
         value: "https://t.me/+1fFwf94J3zxjMmYy"
+      - key: METRO_FEE
+        value: "100"
       - key: PICKUP_POINTS
         value: "м. Студенческая, пл. Кирова"
     # Данные и фото хранятся в Neon (DATABASE_URL) — Persistent Disk не нужен.

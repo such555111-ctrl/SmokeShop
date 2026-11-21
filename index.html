@@ -476,6 +476,9 @@
   .crumbs b{color:var(--accent);}
   /* ---------- оформление: самовывоз / доставка ---------- */
   .seg{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:4px;}
+  .seg.seg3{grid-template-columns:repeat(3,1fr);gap:6px;}
+  .seg.seg3 .seg-btn{padding:11px 4px;font-size:11.5px;}
+  .co-hint{margin-top:6px;font-size:12px;color:var(--muted);line-height:1.4;}
   .seg-btn{padding:12px 8px;border:1.5px solid var(--line);background:var(--bg);color:var(--muted);font-family:var(--font-heading);font-weight:800;font-size:12px;border-radius:12px;cursor:pointer;transition:all .2s var(--ease);line-height:1.3;}
   .seg-btn small{display:block;font-weight:600;font-size:10px;opacity:.8;margin-top:2px;}
   .seg-btn:active{transform:scale(.95);}
@@ -1643,9 +1646,10 @@
     <input type="tel" id="coPhone" class="text-input" placeholder="+7 900 000-00-00">
 
     <div class="label" style="margin-top:18px;">Как получить заказ</div>
-    <div class="seg" id="coMode">
+    <div class="seg seg3" id="coMode">
       <button type="button" class="seg-btn active" data-mode="pickup">📍 Самовывоз<small>бесплатно</small></button>
       <button type="button" class="seg-btn" data-mode="delivery">🚚 Доставка<small id="coFeeLabel">+200 ₽</small></button>
+      <button type="button" class="seg-btn" data-mode="metro">🚇 По метро<small id="coMetroFeeLabel">+100 ₽</small></button>
     </div>
 
     <div class="co-box" id="coPickupBox">
@@ -1655,6 +1659,12 @@
     <div class="co-box" id="coDeliveryBox" style="display:none;">
       <div class="label" style="margin-top:14px;">Адрес доставки</div>
       <textarea id="coAddress" class="text-input" style="min-height:64px;" placeholder="Улица, дом, подъезд, этаж, квартира"></textarea>
+    </div>
+
+    <div class="co-box" id="coMetroBox" style="display:none;">
+      <div class="label" style="margin-top:14px;">Станция метро</div>
+      <input type="text" id="coStation" class="text-input" maxlength="100" placeholder="Например, Площадь Ленина">
+      <div class="co-hint" id="coMetroHint">Доставка по линии метро — встретимся на выбранной станции. Доплата к заказу +100 ₽.</div>
     </div>
 
     <div class="label" style="margin-top:15px;">Когда удобно</div>
@@ -1672,7 +1682,7 @@
 
     <div class="co-summary" id="coSummary">
       <div><span>Товары</span><span id="coSumGoods">0 ₽</span></div>
-      <div id="coSumDlvRow" style="display:none;"><span>Доставка</span><span id="coSumDlv">0 ₽</span></div>
+      <div id="coSumDlvRow" style="display:none;"><span id="coSumDlvLabel">Доставка</span><span id="coSumDlv">0 ₽</span></div>
       <div class="loy-line" id="coSumPtsRow" style="display:none;"><span>Скидка баллами</span><span id="coSumPts">−0 ₽</span></div>
       <div class="tot"><span>Итого</span><b id="coSumTotal"><s class="loy-old" id="coOld"></s><span id="coNew">0 ₽</span></b></div>
       <div class="loy-cb" id="coSumCbRow" style="display:none;"><span>Кешбэк за заказ</span><span id="coSumCb">+0 баллов</span></div>
@@ -1760,6 +1770,7 @@ const SWATCHES = [
   'radial-gradient(circle at 75% 15%,rgba(255,255,255,.16),transparent 45%),linear-gradient(155deg,#BE3A6B,#2A0A16 92%)'
 ];
 let DELIVERY_FEE = 200;
+let METRO_FEE = 100;
 let PICKUP_POINTS = ['м. Студенческая', 'пл. Кирова'];
 let SHOP_CONTACT = 'ShopVAPEShop_07'; // Telegram-аккаунт менеджера (без @); сервер может переопределить через SHOP_CONTACT
 let SHOP_CHANNEL_URL = 'https://t.me/+1fFwf94J3zxjMmYy';   // ссылка на канал; сервер может переопределить через SHOP_CHANNEL_URL
@@ -2813,10 +2824,12 @@ var coState = { mode:'pickup', point:null, when:'asap' };
 function pad2(n){ return String(n).padStart(2,'0'); }
 function todayStr(){ const d = new Date(); return `${d.getFullYear()}-${pad2(d.getMonth()+1)}-${pad2(d.getDate())}`; }
 
+function deliveryFeeFor(mode){ return mode === 'delivery' ? DELIVERY_FEE : (mode === 'metro' ? METRO_FEE : 0); }
+
 function checkoutTotal(){
   const subtotal = cartSubtotal();
   const discount = appliedPromo ? computePromoDiscount(appliedPromo, subtotal) : 0;
-  const fee = coState.mode === 'delivery' ? DELIVERY_FEE : 0;
+  const fee = deliveryFeeFor(coState.mode);
   const goods = subtotal - discount;
   const loy = loyaltyCalc(goods);
   const total = round2(goods - loy.spendRub + fee);
@@ -2829,6 +2842,7 @@ function updateCheckoutSummary(){
   document.getElementById('coSumGoods').textContent = fmt(s.subtotal - s.discount);
   document.getElementById('coSumDlvRow').style.display = s.fee ? 'flex' : 'none';
   document.getElementById('coSumDlv').textContent = fmt(s.fee);
+  document.getElementById('coSumDlvLabel').textContent = coState.mode === 'metro' ? 'Доставка по метро' : 'Доставка';
   document.getElementById('coSumPtsRow').style.display = s.points ? 'flex' : 'none';
   document.getElementById('coSumPts').textContent = '−' + fmt(s.pointsRub);
   setTotalDisplay('coSumTotal', 'coOld', 'coNew', round2(s.subtotal - s.discount + s.fee), s.total, s.points > 0);
@@ -2839,11 +2853,14 @@ function updateCheckoutSummary(){
 function renderCheckoutOpts(){
   if (!coState.point || !PICKUP_POINTS.includes(coState.point)) coState.point = PICKUP_POINTS[0];
   document.getElementById('coFeeLabel').textContent = DELIVERY_FEE ? '+' + fmt(DELIVERY_FEE) : 'бесплатно';
+  document.getElementById('coMetroFeeLabel').textContent = METRO_FEE ? '+' + fmt(METRO_FEE) : 'бесплатно';
+  document.getElementById('coMetroHint').textContent = 'Доставка по линии метро — встретимся на выбранной станции.' + (METRO_FEE ? ' Доплата к заказу +' + fmt(METRO_FEE) + '.' : '');
   const box = document.getElementById('coPoints');
   box.innerHTML = PICKUP_POINTS.map(p => `<button type="button" class="size-btn ${p===coState.point?'active':''}" data-point="${p}">${p}</button>`).join('');
   box.querySelectorAll('.size-btn').forEach(b => b.onclick = () => { coState.point = b.dataset.point; renderCheckoutOpts(); });
   document.getElementById('coPickupBox').style.display = coState.mode === 'pickup' ? '' : 'none';
   document.getElementById('coDeliveryBox').style.display = coState.mode === 'delivery' ? '' : 'none';
+  document.getElementById('coMetroBox').style.display = coState.mode === 'metro' ? '' : 'none';
   document.getElementById('coTimeBox').style.display = coState.when === 'time' ? '' : 'none';
   document.querySelectorAll('#coMode .seg-btn').forEach(b => b.classList.toggle('active', b.dataset.mode === coState.mode));
   document.querySelectorAll('#coWhen .seg-btn').forEach(b => b.classList.toggle('active', b.dataset.when === coState.when));
@@ -2858,7 +2875,9 @@ renderCheckoutOpts();
 
 function deliveryLine(d){
   if (!d) return '';
-  const place = d.mode === 'delivery' ? `🚚 Доставка: ${d.address||'—'}` : `📍 Самовывоз: ${d.point||'—'}`;
+  const place = d.mode === 'delivery' ? `🚚 Доставка: ${escHtml(d.address||'—')}`
+    : d.mode === 'metro' ? `🚇 Доставка по метро: ст. ${escHtml(d.station||'—')}`
+    : `📍 Самовывоз: ${escHtml(d.point||'—')}`;
   let when = '⚡ Как можно скорее';
   if (!d.asap && d.date){
     const [y,m,dd] = d.date.split('-');
@@ -2897,9 +2916,10 @@ async function submitOrder(){
   }
 
   const addrEl = document.getElementById('coAddress');
+  const stationEl = document.getElementById('coStation');
   const dateEl = document.getElementById('coDate');
   const timeEl = document.getElementById('coTime');
-  [addrEl, dateEl, timeEl].forEach(e => e.classList.remove('err'));
+  [addrEl, stationEl, dateEl, timeEl].forEach(e => e.classList.remove('err'));
   const fail = (msg, el) => {
     errEl.textContent = msg;
     if (el) el.classList.add('err');
@@ -2907,6 +2927,9 @@ async function submitOrder(){
   };
   if (coState.mode === 'delivery' && addrEl.value.trim().length < 5){
     return fail('Укажите адрес доставки', addrEl);
+  }
+  if (coState.mode === 'metro' && stationEl.value.trim().length < 2){
+    return fail('Укажите станцию метро', stationEl);
   }
   if (coState.when === 'time'){
     if (!dateEl.value || !timeEl.value) return fail('Выберите дату и время', !timeEl.value ? timeEl : dateEl);
@@ -2928,6 +2951,7 @@ async function submitOrder(){
       mode: coState.mode,
       point: coState.mode === 'pickup' ? coState.point : null,
       address: coState.mode === 'delivery' ? addrEl.value.trim() : null,
+      station: coState.mode === 'metro' ? stationEl.value.trim() : null,
       asap: coState.when === 'asap',
       date: coState.when === 'time' ? dateEl.value : null,
       time: coState.when === 'time' ? timeEl.value : null,
@@ -2969,7 +2993,7 @@ async function submitOrder(){
     document.getElementById('coName').value = '';
     document.getElementById('coPhone').value = '';
     document.getElementById('coComment').value = '';
-    addrEl.value = ''; timeEl.value = '';
+    addrEl.value = ''; stationEl.value = ''; timeEl.value = '';
     coState.when = 'asap'; coState.mode = 'pickup'; renderCheckoutOpts();
     openSheet('successSheet');
     showToast('Заказ отправлен на обработку', 'success');
@@ -3065,6 +3089,7 @@ fetch('/api/config').then(r => r.ok ? r.json() : null).then(c => {
   if (c && c.contact) SHOP_CONTACT = c.contact;
   if (c && c.channel_url) SHOP_CHANNEL_URL = c.channel_url;
   if (c && Number.isFinite(c.delivery_fee)) DELIVERY_FEE = c.delivery_fee;
+  if (c && Number.isFinite(c.metro_fee)) METRO_FEE = c.metro_fee;
   if (c && Array.isArray(c.pickup_points) && c.pickup_points.length) PICKUP_POINTS = c.pickup_points;
   renderContacts();
   if (c && Number.isFinite(c.max_points_percent)) LOYALTY.maxPercent = c.max_points_percent;
@@ -3612,15 +3637,33 @@ document.getElementById('favGrid').addEventListener('click', onQuickAddClick, tr
    БОКОВОЕ МЕНЮ КАТЕГОРИЙ
    ===================================================================== */
 
-// Соответствие пунктов меню реальным категориям из products.json.
-// Меняй список cats / условие test под свой ассортимент.
-const MENU_MAP = {
-  all:  { label:'Все товары' },
-  vape: { label:'Вейпы и расходники', cats:['Одноразки','Жидкость','Поды','Расходники','Ватки'] },
-  chew: { label:'Жевательный табак', cats:['Шайбы'] },
-  cigs: { label:'Импортные сигареты / сигариллы', cats:['Сигареты'] },
-  sale: { label:'РАСПРОДАЖА', test: p => p.badge === 'sale' || (p.old_price > p.price) }
-};
+// Разделы и категории меню настраиваются в админке (вкладка «Категории») и приходят из /api/menu.
+// Если сервер недоступен — работаем по запасному списку ниже.
+var MENU_SECTIONS = [
+  { id:1, name:'Вейпы и расходники', categories:['Одноразки','Жидкость','Поды','Расходники','Ватки'] },
+  { id:2, name:'Жевательный табак', categories:['Шайбы'] },
+  { id:3, name:'Импортные сигареты / сигариллы', categories:['Сигареты'] }
+];
+const MENU_MAP = {};
+
+// Пересобирает MENU_MAP: «Все товары» → разделы → (категории товаров, которых нет в меню) → «РАСПРОДАЖА».
+// Товар никогда не пропадает из меню, даже если его категорию забыли добавить в админке.
+function rebuildMenuMap(){
+  Object.keys(MENU_MAP).forEach(k => delete MENU_MAP[k]);
+  MENU_MAP.all = { label:'Все товары' };
+  const known = new Set();
+  MENU_SECTIONS.forEach(sec => {
+    (sec.categories || []).forEach(c => known.add(c));
+    MENU_MAP['s' + sec.id] = { label:sec.name, cats:(sec.categories || []).slice() };
+  });
+  const extra = [...new Set(PRODUCTS.map(p => p.category).filter(c => c && !known.has(c)))];
+  if (extra.length) MENU_MAP.other = { label:'Другое', cats:extra };
+  MENU_MAP.sale = { label:'РАСПРОДАЖА', test: p => p.badge === 'sale' || (p.old_price > p.price) };
+}
+rebuildMenuMap();
+fetch('/api/menu').then(r => r.ok ? r.json() : null).then(m => {
+  if (m && Array.isArray(m.sections) && m.sections.length){ MENU_SECTIONS = m.sections; rebuildMenuMap(); }
+}).catch(() => {});
 
 // null = фильтра нет. var, чтобы функции были доступны из renderGrid/runSearch в любой момент.
 var menuFilter = null;
@@ -3640,7 +3683,7 @@ function menuPass(p){ return !menuFilter || menuFilter.test(p); }
   /* ---------- открытие / закрытие ---------- */
   function openMenu(){
     if (isOpen()) return;
-    navTree = buildTree(); navPath = []; navDir = ''; renderNav();
+    rebuildMenuMap(); navTree = buildTree(); navPath = []; navDir = ''; renderNav();
     lastFocus = document.activeElement;
     if (typeof searchInput !== 'undefined') searchInput.blur();
     sidebar.classList.add('active');
@@ -3702,6 +3745,7 @@ function menuPass(p){ return !menuFilter || menuFilter.test(p); }
       } else if (cats.length === 1){
         kids = brandNodes(key, cats[0]);
       }
+      if (!count && key !== 'sale') continue;          // пустые разделы покупателям не показываем
       root.push({ label:def.label, key, count, kids, sale:key === 'sale' });
     }
     return root;

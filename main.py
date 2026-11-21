@@ -60,6 +60,10 @@ try:
     DELIVERY_FEE = int(os.environ.get("DELIVERY_FEE", "200"))
 except ValueError:
     DELIVERY_FEE = 200
+try:
+    METRO_FEE = int(os.environ.get("METRO_FEE", "100"))     # доплата за доставку по линии метро
+except ValueError:
+    METRO_FEE = 100
 PICKUP_POINTS = [
     p.strip() for p in (os.environ.get("PICKUP_POINTS") or "м. Студенческая, пл. Кирова").split(",") if p.strip()
 ]
@@ -168,6 +172,16 @@ class Question(_DocMixin, Base):
 
 class Promo(_DocMixin, Base):
     __tablename__ = "promos"
+
+
+class MenuSection(_DocMixin, Base):
+    """Раздел бокового меню каталога: {id, name, sort}."""
+    __tablename__ = "menu_sections"
+
+
+class MenuCategory(_DocMixin, Base):
+    """Категория товаров внутри раздела: {id, name, section_id, sort}."""
+    __tablename__ = "menu_categories"
 
 
 class StoredImage(Base):
@@ -655,6 +669,72 @@ def save_promos(items):
 seed_from_files_once()
 
 
+# --- Категории каталога (боковое меню) ------------------------------------
+# Раздел (например «Вейпы и расходники») содержит категории («Поды», «Жидкость»…).
+# У товара в поле category лежит название категории — так же, как раньше.
+DEFAULT_MENU = [
+    ("Вейпы и расходники", ["Одноразки", "Жидкость", "Поды", "Расходники", "Ватки"]),
+    ("Жевательный табак", ["Шайбы"]),
+    ("Импортные сигареты / сигариллы", ["Сигареты"]),
+]
+
+
+def load_menu():
+    """Возвращает (sections, categories), отсортированные по sort, затем по id."""
+    sections = _load_docs(MenuSection)
+    cats = _load_docs(MenuCategory)
+    key = lambda x: (x.get("sort", 0), x.get("id", 0))
+    return sorted(sections, key=key), sorted(cats, key=key)
+
+
+def seed_menu_once():
+    """Первый запуск: создаём разделы и категории из прежнего жёстко заданного меню.
+    Категории, которые уже есть у товаров, но не вошли в меню, попадают в раздел «Другое»."""
+    try:
+        with DocSession() as db:
+            if db.get(Meta, "menu_seeded_v1"):
+                return
+        if not _load_docs(MenuSection) and not _load_docs(MenuCategory):
+            sections, cats, known = [], [], set()
+            for si, (sname, cnames) in enumerate(DEFAULT_MENU, start=1):
+                sections.append({"id": si, "name": sname, "sort": si})
+                for cname in cnames:
+                    cats.append({"id": len(cats) + 1, "name": cname, "section_id": si, "sort": len(cats) + 1})
+                    known.add(cname.lower())
+            orphans = []
+            for p in load_products():
+                c = (p.get("category") or "").strip()
+                if c and c.lower() not in known and c not in orphans:
+                    orphans.append(c)
+            if orphans:
+                oid = len(sections) + 1
+                sections.append({"id": oid, "name": "Другое", "sort": oid})
+                for c in orphans:
+                    cats.append({"id": len(cats) + 1, "name": c, "section_id": oid, "sort": len(cats) + 1})
+            _save_docs(MenuSection, sections)
+            _save_docs(MenuCategory, cats)
+        with DocSession() as db:
+            db.add(Meta(key="menu_seeded_v1", value=datetime.now(timezone.utc).isoformat()))
+            db.commit()
+    except Exception:
+        log.exception("Не удалось создать категории меню")
+
+
+seed_menu_once()
+
+
+def _clean_name(raw, limit=60):
+    return " ".join(str(raw or "").split())[:limit]
+
+
+def _next_id(items):
+    return max([x.get("id", 0) for x in items], default=0) + 1
+
+
+def _next_sort(items):
+    return max([x.get("sort", 0) for x in items], default=0) + 1
+
+
 def fmt_price(n):
     n = float(n)
     if n.is_integer():
@@ -882,7 +962,7 @@ def index():
 
 @app.route("/api/config", methods=["GET"])
 def public_config():
-    return jsonify({"contact": SHOP_CONTACT, "channel_url": SHOP_CHANNEL_URL, "delivery_fee": DELIVERY_FEE, "pickup_points": PICKUP_POINTS,
+    return jsonify({"contact": SHOP_CONTACT, "channel_url": SHOP_CHANNEL_URL, "delivery_fee": DELIVERY_FEE, "metro_fee": METRO_FEE, "pickup_points": PICKUP_POINTS,
                     "cashback_percent": CASHBACK_PERCENT, "max_points_percent": MAX_POINTS_PERCENT,
                     "point_value": POINT_VALUE})
 
@@ -945,15 +1025,22 @@ def parse_delivery(raw):
     """Проверяет блок доставки из заказа и возвращает (delivery, error)."""
     raw = raw if isinstance(raw, dict) else {}
     mode = raw.get("mode")
-    if mode not in ("pickup", "delivery"):
-        return None, "Выберите самовывоз или доставку"
+    if mode not in ("pickup", "delivery", "metro"):
+        return None, "Выберите способ получения"
 
-    d = {"mode": mode, "point": None, "address": None, "asap": True, "date": None, "time": None, "fee": 0}
+    d = {"mode": mode, "point": None, "address": None, "station": None,
+         "asap": True, "date": None, "time": None, "fee": 0}
     if mode == "pickup":
         point = (raw.get("point") or "").strip()
         if point not in PICKUP_POINTS:
             return None, "Выберите пункт самовывоза"
         d["point"] = point
+    elif mode == "metro":
+        station = " ".join(str(raw.get("station") or "").split())
+        if len(station) < 2:
+            return None, "Укажите станцию метро"
+        d["station"] = station[:100]
+        d["fee"] = METRO_FEE
     else:
         address = (raw.get("address") or "").strip()
         if len(address) < 5:
@@ -980,6 +1067,8 @@ def delivery_text(d):
         return ""
     if d.get("mode") == "delivery":
         line = f"🚚 Доставка ({fmt_price(d.get('fee') or 0)}): {d.get('address') or '—'}"
+    elif d.get("mode") == "metro":
+        line = f"🚇 Доставка по метро ({fmt_price(d.get('fee') or 0)}): станция {d.get('station') or '—'}"
     else:
         line = f"📍 Самовывоз: {d.get('point') or '—'}"
     if d.get("asap", True):
@@ -1117,7 +1206,8 @@ def create_order():
     )
 
     delivery_block = delivery_text(delivery)
-    fee_line = f"Доставка: {fmt_price(delivery['fee'])}\n" if delivery["fee"] else ""
+    fee_label = "Доставка по метро" if delivery["mode"] == "metro" else "Доставка"
+    fee_line = f"{fee_label}: {fmt_price(delivery['fee'])}\n" if delivery["fee"] else ""
     loyalty_line = (f"Оплачено баллами: {points_to_spend} б. ({fmt_price(points_discount)}) | "
                     f"Начислено кешбэка: {cashback} б. ({fmt_price(cashback * POINT_VALUE)})\n")
 
@@ -1347,6 +1437,214 @@ def healthz():
 def admin_login():
     require_admin()
     return jsonify({"ok": True})
+
+
+
+# --- Категории каталога: публичный API и админка ---------------------------
+
+@app.route("/api/menu", methods=["GET"])
+def public_menu():
+    """Разделы и категории бокового меню (в порядке, заданном в админке)."""
+    sections, cats = load_menu()
+    out = [{"id": sec["id"], "name": sec["name"],
+            "categories": [c["name"] for c in cats if c.get("section_id") == sec["id"]]}
+           for sec in sections]
+    resp = jsonify({"sections": out})
+    resp.headers["Cache-Control"] = "no-cache"
+    return resp
+
+
+def _menu_admin_view():
+    sections, cats = load_menu()
+    counts = {}
+    for p in load_products():
+        c = (p.get("category") or "").strip()
+        counts[c] = counts.get(c, 0) + 1
+    return {"sections": [
+        {"id": sec["id"], "name": sec["name"], "sort": sec.get("sort", 0),
+         "categories": [{"id": c["id"], "name": c["name"], "section_id": sec["id"],
+                         "sort": c.get("sort", 0), "count": counts.get(c["name"], 0)}
+                        for c in cats if c.get("section_id") == sec["id"]]}
+        for sec in sections]}
+
+
+@app.route("/api/admin/menu", methods=["GET"])
+def admin_get_menu():
+    require_admin()
+    return jsonify(_menu_admin_view())
+
+
+@app.route("/api/admin/menu/sections", methods=["POST"])
+@locked
+def admin_create_section():
+    require_admin()
+    data = request.get_json(force=True, silent=True) or {}
+    name = _clean_name(data.get("name"))
+    if not name:
+        abort(400, description="Укажите название раздела")
+    sections, _ = load_menu()
+    if any(x["name"].lower() == name.lower() for x in sections):
+        abort(400, description="Такой раздел уже есть")
+    sections.append({"id": _next_id(sections), "name": name, "sort": _next_sort(sections)})
+    _save_docs(MenuSection, sections)
+    return jsonify(_menu_admin_view()), 201
+
+
+@app.route("/api/admin/menu/sections/<int:sid>", methods=["PUT"])
+@locked
+def admin_update_section(sid):
+    require_admin()
+    data = request.get_json(force=True, silent=True) or {}
+    name = _clean_name(data.get("name"))
+    if not name:
+        abort(400, description="Укажите название раздела")
+    sections, _ = load_menu()
+    sec = next((x for x in sections if x["id"] == sid), None)
+    if not sec:
+        abort(404, description="Раздел не найден")
+    if any(x["name"].lower() == name.lower() and x["id"] != sid for x in sections):
+        abort(400, description="Такой раздел уже есть")
+    sec["name"] = name
+    _save_docs(MenuSection, sections)
+    return jsonify(_menu_admin_view())
+
+
+@app.route("/api/admin/menu/sections/<int:sid>", methods=["DELETE"])
+@locked
+def admin_delete_section(sid):
+    require_admin()
+    sections, cats = load_menu()
+    if not any(x["id"] == sid for x in sections):
+        abort(404, description="Раздел не найден")
+    if any(c.get("section_id") == sid for c in cats):
+        abort(400, description="В разделе есть категории — сначала удалите или перенесите их")
+    _save_docs(MenuSection, [x for x in sections if x["id"] != sid])
+    return jsonify(_menu_admin_view())
+
+
+@app.route("/api/admin/menu/categories", methods=["POST"])
+@locked
+def admin_create_category():
+    require_admin()
+    data = request.get_json(force=True, silent=True) or {}
+    name = _clean_name(data.get("name"))
+    if not name:
+        abort(400, description="Укажите название категории")
+    sections, cats = load_menu()
+    try:
+        sid = int(data.get("section_id"))
+    except (TypeError, ValueError):
+        sid = None
+    if not any(x["id"] == sid for x in sections):
+        abort(400, description="Выберите раздел")
+    if any(c["name"].lower() == name.lower() for c in cats):
+        abort(400, description="Категория с таким названием уже есть")
+    cats.append({"id": _next_id(cats), "name": name, "section_id": sid, "sort": _next_sort(cats)})
+    _save_docs(MenuCategory, cats)
+    return jsonify(_menu_admin_view()), 201
+
+
+@app.route("/api/admin/menu/categories/<int:cid>", methods=["PUT"])
+@locked
+def admin_update_category(cid):
+    """Переименование и/или перенос в другой раздел. При переименовании товары переезжают вместе с категорией."""
+    require_admin()
+    data = request.get_json(force=True, silent=True) or {}
+    sections, cats = load_menu()
+    cat = next((c for c in cats if c["id"] == cid), None)
+    if not cat:
+        abort(404, description="Категория не найдена")
+    old_name = cat["name"]
+    if "name" in data:
+        name = _clean_name(data.get("name"))
+        if not name:
+            abort(400, description="Укажите название категории")
+        if any(c["name"].lower() == name.lower() and c["id"] != cid for c in cats):
+            abort(400, description="Категория с таким названием уже есть")
+        cat["name"] = name
+    if "section_id" in data:
+        try:
+            sid = int(data.get("section_id"))
+        except (TypeError, ValueError):
+            sid = None
+        if not any(x["id"] == sid for x in sections):
+            abort(400, description="Выберите раздел")
+        if sid != cat.get("section_id"):
+            cat["section_id"] = sid
+            cat["sort"] = _next_sort(cats)          # в конец нового раздела
+    _save_docs(MenuCategory, cats)
+    if cat["name"] != old_name:
+        products_list = load_products()
+        changed = False
+        for p in products_list:
+            if (p.get("category") or "").strip() == old_name:
+                p["category"] = cat["name"]
+                changed = True
+        if changed:
+            save_products(products_list)
+    return jsonify(_menu_admin_view())
+
+
+@app.route("/api/admin/menu/categories/<int:cid>", methods=["DELETE"])
+@locked
+def admin_delete_category(cid):
+    """Удаление категории. Если в ней есть товары — нужно указать move_to (id другой категории)."""
+    require_admin()
+    cats = load_menu()[1]
+    cat = next((c for c in cats if c["id"] == cid), None)
+    if not cat:
+        abort(404, description="Категория не найдена")
+    products_list = load_products()
+    used = [p for p in products_list if (p.get("category") or "").strip() == cat["name"]]
+    if used:
+        try:
+            target = next((c for c in cats if c["id"] == int(request.args.get("move_to", "")) and c["id"] != cid), None)
+        except ValueError:
+            target = None
+        if not target:
+            abort(400, description=f"В категории {len(used)} товар(ов) — выберите, куда их перенести")
+        for p in used:
+            p["category"] = target["name"]
+        save_products(products_list)
+    _save_docs(MenuCategory, [c for c in cats if c["id"] != cid])
+    return jsonify(_menu_admin_view())
+
+
+@app.route("/api/admin/menu/move", methods=["POST"])
+@locked
+def admin_move_menu_item():
+    """Сдвиг раздела или категории (внутри раздела) на одну позицию: dir = -1 (вверх) или 1 (вниз)."""
+    require_admin()
+    data = request.get_json(force=True, silent=True) or {}
+    kind = data.get("kind")
+    direction = -1 if data.get("dir") in (-1, "-1") else 1
+    try:
+        item_id = int(data.get("id"))
+    except (TypeError, ValueError):
+        abort(400, description="Некорректный id")
+    sections, cats = load_menu()
+    if kind == "section":
+        model, group = MenuSection, sections
+    elif kind == "category":
+        model = MenuCategory
+        cur = next((c for c in cats if c["id"] == item_id), None)
+        if not cur:
+            abort(404, description="Категория не найдена")
+        group = [c for c in cats if c.get("section_id") == cur.get("section_id")]
+    else:
+        abort(400, description="Некорректный тип")
+    idx = next((i for i, x in enumerate(group) if x["id"] == item_id), None)
+    if idx is None:
+        abort(404, description="Не найдено")
+    j = idx + direction
+    if 0 <= j < len(group):
+        order = [x["id"] for x in group]
+        order[idx], order[j] = order[j], order[idx]
+        pos = {iid: n for n, iid in enumerate(order, start=1)}     # перенумеровываем всю группу
+        for x in group:
+            x["sort"] = pos[x["id"]]
+        _save_docs(model, sections if kind == "section" else cats)
+    return jsonify(_menu_admin_view())
 
 
 @app.route("/api/admin/products", methods=["GET"])

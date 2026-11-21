@@ -269,6 +269,23 @@
   .photo-tile.uploading{display:flex;align-items:center;justify-content:center;color:var(--muted);font-size:10px;}
   .modal-actions{display:flex;gap:10px;margin-top:24px;}
   .modal-actions > *{flex:1;}
+
+  /* --- Категории --- */
+  .sel{width:100%;background:var(--bg);border:1.5px solid var(--line);color:var(--text);padding:12px 14px;font-family:var(--font-body);font-size:16px;border-radius:8px;outline:none;transition:all .2s var(--ease);}
+  .sel:focus{border-color:var(--accent);box-shadow:0 0 0 4px var(--accent-dim);}
+  .sec-head{display:flex;align-items:center;justify-content:space-between;gap:10px;position:relative;z-index:1;}
+  .sec-name{font-family:var(--font-heading);font-weight:800;font-size:16px;word-break:break-word;}
+  .sec-meta{font-size:11px;color:var(--muted);margin-top:2px;}
+  .cat-row{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:10px 0;border-top:1px solid var(--line);position:relative;z-index:1;}
+  .cat-row-name{font-size:14px;font-weight:600;word-break:break-word;}
+  .cat-row-cnt{font-size:11px;color:var(--muted);margin-top:2px;}
+  .mini-actions{display:flex;gap:6px;flex:0 0 auto;}
+  .mini-btn{min-width:34px;height:34px;padding:0 8px;border-radius:10px;border:1.5px solid var(--line);background:transparent;color:var(--text);font-size:14px;cursor:pointer;font-family:var(--font-body);}
+  .mini-btn:active{transform:scale(.92);}
+  .mini-btn:disabled{opacity:.3;cursor:default;}
+  .mini-btn.danger{color:#ff6b81;border-color:rgba(255,107,129,.4);}
+  .cat-toolbar{display:flex;gap:8px;margin-bottom:14px;}
+  .cat-toolbar .btn-outline{padding:10px 16px;font-size:12px;}
   .empty{text-align:center;color:var(--muted);font-size:13px;padding:48px 0;line-height:1.6;}
   .toast-stack{
     position:fixed;left:50%;bottom:24px;transform:translateX(-50%);z-index:60;
@@ -430,6 +447,7 @@
     <button class="tab-btn" data-tab="orders">Заказы<span class="tab-badge" id="ordersBadge" style="display:none;"></span></button>
     <button class="tab-btn" data-tab="questions">Вопросы<span class="tab-badge" id="questionsBadge" style="display:none;"></span></button>
     <button class="tab-btn" data-tab="reviews">Отзывы<span class="tab-badge" id="reviewsBadge" style="display:none;"></span></button>
+    <button class="tab-btn" data-tab="categories">Категории</button>
     <button class="tab-btn" data-tab="promos">Промокоды</button>
   </div>
   <div class="muted" id="countLabel"></div>
@@ -454,6 +472,8 @@
     <label>Название</label>
     <input type="text" id="fName" placeholder="PAFOS 20000">
 
+    <div class="muted" style="margin-top:14px;">Категории и разделы меню настраиваются во вкладке «Категории».</div>
+
     <label>Подкатегория / бренд</label>
     <input type="text" id="fSub" list="subList" placeholder="Vaporesso (необязательно)">
     <datalist id="subList"></datalist>
@@ -461,7 +481,7 @@
     <div class="row">
       <div>
         <label>Категория</label>
-        <input type="text" id="fCategory" placeholder="Поды">
+        <select id="fCategory" class="sel"></select>
       </div>
       <div>
         <label>Цена, ₽</label>
@@ -542,6 +562,43 @@
   </div>
 </div>
 
+<div class="overlay" id="catOverlay">
+  <div class="modal">
+    <div class="modal-title" id="catModalTitle">Новая категория</div>
+    <div class="muted" id="catModalSub"></div>
+
+    <label id="catNameLabel">Название</label>
+    <input type="text" id="cName" maxlength="60" placeholder="Например, Поды">
+
+    <div id="cSecWrap">
+      <label>Раздел меню</label>
+      <select id="cSection" class="sel"></select>
+    </div>
+
+    <div class="error" id="catFormError"></div>
+    <div class="modal-actions">
+      <button class="btn-outline" id="catCancelBtn">Отмена</button>
+      <button class="btn" id="catSaveBtn">Сохранить</button>
+    </div>
+  </div>
+</div>
+
+<div class="overlay" id="catDelOverlay">
+  <div class="modal">
+    <div class="modal-title">Удалить категорию</div>
+    <div class="muted" id="catDelText"></div>
+    <div id="catDelMoveWrap">
+      <label>Куда перенести товары</label>
+      <select id="catDelTarget" class="sel"></select>
+    </div>
+    <div class="error" id="catDelError"></div>
+    <div class="modal-actions">
+      <button class="btn-outline" id="catDelCancelBtn">Отмена</button>
+      <button class="btn-danger" id="catDelOkBtn">Удалить</button>
+    </div>
+  </div>
+</div>
+
 <div class="toast-stack" id="toastStack"></div>
 
 <script>
@@ -568,6 +625,7 @@ let orders = [];
 let questions = [];
 let reviews = [];
 let promos = [];
+let menuData = { sections: [] };
 let currentTab = 'products';
 let editingId = null;
 let selectedSwatch = 0;
@@ -645,9 +703,10 @@ async function enterApp(){
   await loadQuestions();
   await loadReviews();
   await loadPromos();
+  await loadMenu();
 }
 
-const TAB_TITLES = { products:'Товары', orders:'Заказы', questions:'Вопросы', reviews:'Отзывы', promos:'Промокоды' };
+const TAB_TITLES = { products:'Товары', orders:'Заказы', questions:'Вопросы', reviews:'Отзывы', categories:'Категории', promos:'Промокоды' };
 
 document.querySelectorAll('.tab-btn').forEach(btn=>{
   btn.onclick = async () => {
@@ -655,7 +714,7 @@ document.querySelectorAll('.tab-btn').forEach(btn=>{
     document.querySelectorAll('.tab-btn').forEach(b=>b.classList.remove('active'));
     btn.classList.add('active');
     currentTab = btn.dataset.tab;
-    document.getElementById('addBtn').style.display = (currentTab === 'products' || currentTab === 'promos') ? 'flex' : 'none';
+    document.getElementById('addBtn').style.display = (currentTab === 'products' || currentTab === 'promos' || currentTab === 'categories') ? 'flex' : 'none';
     document.getElementById('viewTitle').textContent = TAB_TITLES[currentTab] || '';
     if (currentTab === 'products'){
       await loadProducts();
@@ -668,6 +727,9 @@ document.querySelectorAll('.tab-btn').forEach(btn=>{
     } else if (currentTab === 'reviews'){
       await loadReviews();
       renderReviews();
+    } else if (currentTab === 'categories'){
+      await loadMenu();
+      renderCategories();
     } else {
       await loadPromos();
       renderPromos();
@@ -819,7 +881,7 @@ function renderOrders(){
         <span class="status-badge status-${o.status}">${statusLabel(o.status)}</span>
       </div>
       <div class="order-items">${(o.items||[]).map(i=>`${i.name} (${i.size||'—'}) × ${i.qty}`).join('<br>')}</div>
-      ${o.delivery ? `<div class="card-sub" style="color:var(--text);line-height:1.7;">${o.delivery.mode==='delivery' ? '🚚 Доставка: '+(o.delivery.address||'—')+' (+'+fmt(o.delivery.fee||0)+')' : '📍 Самовывоз: '+(o.delivery.point||'—')}<br>${o.delivery.asap ? '⚡ Как можно скорее' : '🕒 '+(o.delivery.date||'').split('-').reverse().slice(0,2).join('.')+' в '+(o.delivery.time||'')}</div>` : ''}
+      ${o.delivery ? `<div class="card-sub" style="color:var(--text);line-height:1.7;">${o.delivery.mode==='delivery' ? '🚚 Доставка: '+(o.delivery.address||'—')+' (+'+fmt(o.delivery.fee||0)+')' : o.delivery.mode==='metro' ? '🚇 Доставка по метро: ст. '+(o.delivery.station||'—')+' (+'+fmt(o.delivery.fee||0)+')' : '📍 Самовывоз: '+(o.delivery.point||'—')}<br>${o.delivery.asap ? '⚡ Как можно скорее' : '🕒 '+(o.delivery.date||'').split('-').reverse().slice(0,2).join('.')+' в '+(o.delivery.time||'')}</div>` : ''}
       ${o.discount ? `<div class="card-sub">Промокод: ${o.promo_code} (−${fmt(o.discount)}) · Сумма товаров: ${fmt(o.subtotal)}</div>` : ''}
       <div class="card-sub">Итого: ${fmt(o.total)}</div>
       <div class="order-contact">
@@ -1185,6 +1247,222 @@ document.getElementById('promoSaveBtn').onclick = async () => {
   }
 };
 
+
+// --- Категории (разделы бокового меню каталога) ---------------------------
+
+const escA = v => String(v ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const jsonOpts = (method, body) => ({ method, headers:{ 'Content-Type':'application/json' }, body: JSON.stringify(body||{}) });
+
+async function loadMenu(){
+  try { menuData = await api('/api/admin/menu'); } catch(e){ /* оставляем прежние данные */ }
+}
+
+// выпадающий список категорий в карточке товара (сгруппирован по разделам)
+function fillCategorySelect(current){
+  const sel = document.getElementById('fCategory');
+  const known = new Set();
+  let html = '<option value="">— выберите категорию —</option>';
+  (menuData.sections || []).forEach(sec => {
+    if (!sec.categories.length) return;
+    html += `<optgroup label="${escA(sec.name)}">` + sec.categories.map(c => {
+      known.add(c.name);
+      return `<option value="${escA(c.name)}">${escA(c.name)}</option>`;
+    }).join('') + '</optgroup>';
+  });
+  if (current && !known.has(current)) html += `<option value="${escA(current)}">${escA(current)} (нет в меню)</option>`;
+  sel.innerHTML = html;
+  sel.value = current || '';
+}
+
+function renderCategories(){
+  const secs = menuData.sections || [];
+  const catN = secs.reduce((n, s) => n + s.categories.length, 0);
+  document.getElementById('countLabel').textContent = `${secs.length} раздел(ов) · ${catN} категор(ий)`;
+  const list = document.getElementById('list');
+  let html = `<div class="cat-toolbar"><button class="btn-outline" data-sec-new>+ Новый раздел</button></div>`;
+  if (!secs.length){
+    list.innerHTML = html + '<div class="empty">Пока нет разделов. Создайте раздел (например, «Вейпы и расходники»), затем добавьте в него категории.</div>';
+  } else {
+    html += secs.map((sec, si) => {
+      const total = sec.categories.reduce((n, c) => n + c.count, 0);
+      return `
+      <div class="order-card">
+        <div class="sec-head">
+          <div>
+            <div class="sec-name">${escA(sec.name)}</div>
+            <div class="sec-meta">Раздел меню · категорий: ${sec.categories.length} · товаров: ${total}</div>
+          </div>
+          <div class="mini-actions">
+            <button class="mini-btn" data-move="section:${sec.id}:-1" ${si===0?'disabled':''} title="Выше">↑</button>
+            <button class="mini-btn" data-move="section:${sec.id}:1" ${si===secs.length-1?'disabled':''} title="Ниже">↓</button>
+          </div>
+        </div>
+        ${sec.categories.map((c, ci) => `
+          <div class="cat-row">
+            <div>
+              <div class="cat-row-name">${escA(c.name)}</div>
+              <div class="cat-row-cnt">Товаров: ${c.count}</div>
+            </div>
+            <div class="mini-actions">
+              <button class="mini-btn" data-move="category:${c.id}:-1" ${ci===0?'disabled':''} title="Выше">↑</button>
+              <button class="mini-btn" data-move="category:${c.id}:1" ${ci===sec.categories.length-1?'disabled':''} title="Ниже">↓</button>
+              <button class="mini-btn" data-cat-edit="${c.id}" title="Изменить">✎</button>
+              <button class="mini-btn danger" data-cat-del="${c.id}" title="Удалить">✕</button>
+            </div>
+          </div>`).join('')}
+        <div class="card-actions" style="margin-top:12px;">
+          <button class="btn-outline" data-cat-new="${sec.id}">+ Категория</button>
+          <button class="btn-outline" data-sec-edit="${sec.id}">Переименовать</button>
+          <button class="btn-danger" data-sec-del="${sec.id}">Удалить раздел</button>
+        </div>
+      </div>`;
+    }).join('');
+    list.innerHTML = html;
+  }
+  list.querySelectorAll('[data-sec-new]').forEach(b => b.onclick = () => openCatModal('section', null));
+  list.querySelectorAll('[data-sec-edit]').forEach(b => b.onclick = () => openCatModal('section', Number(b.dataset.secEdit)));
+  list.querySelectorAll('[data-sec-del]').forEach(b => b.onclick = () => deleteSection(Number(b.dataset.secDel)));
+  list.querySelectorAll('[data-cat-new]').forEach(b => b.onclick = () => openCatModal('category', null, Number(b.dataset.catNew)));
+  list.querySelectorAll('[data-cat-edit]').forEach(b => b.onclick = () => openCatModal('category', Number(b.dataset.catEdit)));
+  list.querySelectorAll('[data-cat-del]').forEach(b => b.onclick = () => openCatDelete(Number(b.dataset.catDel)));
+  list.querySelectorAll('[data-move]').forEach(b => b.onclick = async () => {
+    const [kind, id, dir] = b.dataset.move.split(':');
+    try {
+      menuData = await api('/api/admin/menu/move', jsonOpts('POST', { kind, id:Number(id), dir:Number(dir) }));
+      renderCategories();
+    } catch(e){ showToast(e.message); }
+  });
+}
+
+function findCategory(id){
+  for (const sec of menuData.sections || []){
+    const c = sec.categories.find(x => x.id === id);
+    if (c) return { cat:c, sec };
+  }
+  return null;
+}
+
+let catModal = { kind:'category', id:null };
+
+function openCatModal(kind, id, presetSectionId){
+  catModal = { kind, id };
+  document.getElementById('catFormError').textContent = '';
+  const secs = menuData.sections || [];
+  const nameEl = document.getElementById('cName');
+  const wrap = document.getElementById('cSecWrap');
+  if (kind === 'section'){
+    const sec = id ? secs.find(x => x.id === id) : null;
+    document.getElementById('catModalTitle').textContent = sec ? 'Переименовать раздел' : 'Новый раздел';
+    document.getElementById('catModalSub').textContent = 'Так он называется в меню каталога (три полоски)';
+    document.getElementById('catNameLabel').textContent = 'Название раздела';
+    nameEl.placeholder = 'Например, Вейпы и расходники';
+    nameEl.value = sec ? sec.name : '';
+    wrap.style.display = 'none';
+  } else {
+    if (!secs.length){ showToast('Сначала создайте раздел'); return; }
+    const found = id ? findCategory(id) : null;
+    document.getElementById('catModalTitle').textContent = found ? 'Изменить категорию' : 'Новая категория';
+    document.getElementById('catModalSub').textContent = found ? 'Название обновится и у всех товаров этой категории' : 'Её можно будет выбрать при добавлении товара';
+    document.getElementById('catNameLabel').textContent = 'Название категории';
+    nameEl.placeholder = 'Например, Поды';
+    nameEl.value = found ? found.cat.name : '';
+    const sel = document.getElementById('cSection');
+    sel.innerHTML = secs.map(x => `<option value="${x.id}">${escA(x.name)}</option>`).join('');
+    sel.value = String(found ? found.sec.id : (presetSectionId || secs[0].id));
+    wrap.style.display = '';
+  }
+  document.getElementById('catOverlay').classList.add('open');
+  setTimeout(() => nameEl.focus(), 150);
+}
+function closeCatModal(){ document.getElementById('catOverlay').classList.remove('open'); }
+document.getElementById('catCancelBtn').onclick = closeCatModal;
+document.getElementById('catOverlay').addEventListener('click', e => { if (e.target.id === 'catOverlay') closeCatModal(); });
+document.getElementById('cName').addEventListener('keydown', e => { if (e.key === 'Enter') document.getElementById('catSaveBtn').click(); });
+
+document.getElementById('catSaveBtn').onclick = async () => {
+  const name = document.getElementById('cName').value.trim();
+  const errEl = document.getElementById('catFormError');
+  if (!name){ errEl.textContent = 'Введите название'; return; }
+  const btn = document.getElementById('catSaveBtn');
+  btn.disabled = true;
+  try {
+    const { kind, id } = catModal;
+    if (kind === 'section'){
+      menuData = id
+        ? await api(`/api/admin/menu/sections/${id}`, jsonOpts('PUT', { name }))
+        : await api('/api/admin/menu/sections', jsonOpts('POST', { name }));
+    } else {
+      const section_id = Number(document.getElementById('cSection').value);
+      menuData = id
+        ? await api(`/api/admin/menu/categories/${id}`, jsonOpts('PUT', { name, section_id }))
+        : await api('/api/admin/menu/categories', jsonOpts('POST', { name, section_id }));
+      if (id) await loadProducts();          // при переименовании товары переехали на сервере
+    }
+    renderCategories();
+    closeCatModal();
+    showToast('Сохранено');
+  } catch(e){
+    errEl.textContent = e.message;
+  } finally {
+    btn.disabled = false;
+  }
+};
+
+async function deleteSection(id){
+  const sec = (menuData.sections || []).find(x => x.id === id);
+  if (!sec) return;
+  if (sec.categories.length){ showToast('В разделе есть категории — сначала удалите или перенесите их'); return; }
+  if (!confirm(`Удалить раздел «${sec.name}»?`)) return;
+  try {
+    menuData = await api(`/api/admin/menu/sections/${id}`, { method:'DELETE' });
+    renderCategories();
+    showToast('Раздел удалён');
+  } catch(e){ showToast(e.message); }
+}
+
+let catDelId = null;
+function openCatDelete(id){
+  const found = findCategory(id);
+  if (!found) return;
+  catDelId = id;
+  const { cat } = found;
+  document.getElementById('catDelError').textContent = '';
+  const wrap = document.getElementById('catDelMoveWrap');
+  const others = [];
+  (menuData.sections || []).forEach(sec => sec.categories.forEach(c => { if (c.id !== id) others.push({ c, sec }); }));
+  if (cat.count > 0){
+    if (!others.length){ showToast('Сначала создайте другую категорию, чтобы перенести в неё товары'); return; }
+    document.getElementById('catDelText').textContent = `В категории «${cat.name}» товаров: ${cat.count}. Выберите, куда их перенести — после этого категория будет удалена.`;
+    document.getElementById('catDelTarget').innerHTML = others.map(({ c, sec }) => `<option value="${c.id}">${escA(sec.name)} › ${escA(c.name)}</option>`).join('');
+    wrap.style.display = '';
+  } else {
+    document.getElementById('catDelText').textContent = `Удалить категорию «${cat.name}»? Товаров в ней нет.`;
+    wrap.style.display = 'none';
+  }
+  document.getElementById('catDelOverlay').classList.add('open');
+}
+function closeCatDelete(){ document.getElementById('catDelOverlay').classList.remove('open'); }
+document.getElementById('catDelCancelBtn').onclick = closeCatDelete;
+document.getElementById('catDelOverlay').addEventListener('click', e => { if (e.target.id === 'catDelOverlay') closeCatDelete(); });
+document.getElementById('catDelOkBtn').onclick = async () => {
+  const found = findCategory(catDelId);
+  if (!found) return;
+  const q = found.cat.count > 0 ? `?move_to=${document.getElementById('catDelTarget').value}` : '';
+  const btn = document.getElementById('catDelOkBtn');
+  btn.disabled = true;
+  try {
+    menuData = await api(`/api/admin/menu/categories/${catDelId}${q}`, { method:'DELETE' });
+    if (found.cat.count > 0) await loadProducts();
+    renderCategories();
+    closeCatDelete();
+    showToast('Категория удалена');
+  } catch(e){
+    document.getElementById('catDelError').textContent = e.message;
+  } finally {
+    btn.disabled = false;
+  }
+};
+
 // --- Modal / form ------------------------------------------------------
 
 function renderSwatchPicker(){
@@ -1213,7 +1491,7 @@ function openModal(id){
   document.getElementById('modalTitle').textContent = p ? 'Изменить товар' : 'Новый товар';
   document.getElementById('modalSub').textContent = p ? p.name : 'заполните карточку товара';
   document.getElementById('fName').value = p?.name || '';
-  document.getElementById('fCategory').value = p?.category || '';
+  fillCategorySelect(p?.category || '');
   document.getElementById('fSub').value = p?.subcategory || '';
   document.getElementById('subList').innerHTML = [...new Set((typeof products!=='undefined'?products:[]).map(x=>x.subcategory).filter(Boolean))].map(s=>`<option value="${s}">`).join('');
   document.getElementById('fPrice').value = p?.price || '';
@@ -1237,7 +1515,8 @@ function closeModal(){
 document.getElementById('cancelBtn').onclick = closeModal;
 document.getElementById('overlay').addEventListener('click', e=>{ if(e.target.id==='overlay') closeModal(); });
 document.getElementById('addBtn').onclick = () => {
-  if (currentTab === 'promos') openPromoModal(null);
+  if (currentTab === 'categories') openCatModal('category', null);
+  else if (currentTab === 'promos') openPromoModal(null);
   else openModal(null);
 };
 
